@@ -1,0 +1,307 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum BillingType {
+  ONE_TIME
+  SUBSCRIPTION
+}
+
+enum AccessPeriodUnit {
+  DAY
+  MONTH
+  YEAR
+}
+
+enum OrderSource {
+  DESKTOP
+  WEB
+  MOBILE
+  API
+  ADMIN
+}
+
+enum OrderStatus {
+  CREATED
+  PAYMENT_PENDING
+  PAID
+  FULFILLED
+  FAILED
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+  STRIPE
+  PAYPAL
+  GOOGLE_PLAY
+  APPLE_APP_STORE
+  MANUAL
+}
+
+enum PaymentAttemptStatus {
+  INITIALIZED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  EXPIRED
+}
+
+enum ProviderEventProcessingStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum EntitlementType {
+  LICENSE
+  SUBSCRIPTION
+  CREDITS
+  SERVICE_ACCESS
+}
+
+enum EntitlementStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  EXPIRED
+}
+
+enum LicenseStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  REVOKED
+  EXPIRED
+}
+
+enum ActivationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Customer {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  orders       Order[]
+  entitlements Entitlement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("customers")
+}
+
+model Product {
+  id          String  @id @default(cuid())
+  appId       String  @map("app_id")
+  productCode String  @map("product_code")
+  name        String
+  description String?
+  active      Boolean @default(true)
+
+  plans        Plan[]
+  orderItems   OrderItem[]
+  entitlements Entitlement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([appId, productCode])
+  @@index([appId, active])
+  @@map("products")
+}
+
+model Plan {
+  id                String           @id @default(cuid())
+  productId         String           @map("product_id")
+  planCode          String           @map("plan_code")
+  name              String
+  billingType       BillingType      @map("billing_type")
+  amountMinor       Int              @map("amount_minor")
+  currency          String           @db.VarChar(3)
+  accessPeriodUnit  AccessPeriodUnit @map("access_period_unit")
+  accessPeriodCount Int              @map("access_period_count")
+  maxDevices        Int              @default(1) @map("max_devices")
+  active            Boolean          @default(true)
+
+  product      Product       @relation(fields: [productId], references: [id])
+  orderItems   OrderItem[]
+  entitlements Entitlement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productId, planCode])
+  @@index([billingType, active])
+  @@map("plans")
+}
+
+model Order {
+  id         String      @id @default(cuid())
+  customerId String      @map("customer_id")
+  status     OrderStatus @default(CREATED)
+  source     OrderSource
+  appId      String      @map("app_id")
+
+  customer        Customer         @relation(fields: [customerId], references: [id])
+  items           OrderItem[]
+  paymentAttempts PaymentAttempt[]
+  entitlements    Entitlement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([customerId, createdAt])
+  @@index([appId, status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String @id @default(cuid())
+  orderId     String @map("order_id")
+  productId   String @map("product_id")
+  planId      String @map("plan_id")
+  quantity    Int    @default(1)
+  amountMinor Int    @map("amount_minor")
+  currency    String @db.VarChar(3)
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  plan    Plan    @relation(fields: [planId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([orderId, productId, planId])
+  @@index([orderId])
+  @@index([productId])
+  @@index([planId])
+  @@map("order_items")
+}
+
+model PaymentAttempt {
+  id                String               @id @default(cuid())
+  orderId           String               @map("order_id")
+  provider          PaymentProvider
+  providerReference String               @map("provider_reference")
+  status            PaymentAttemptStatus @default(INITIALIZED)
+  amountMinor       Int                  @map("amount_minor")
+  currency          String               @db.VarChar(3)
+  checkoutUrl       String?              @map("checkout_url")
+  initializedAt     DateTime             @default(now()) @map("initialized_at")
+  completedAt       DateTime?            @map("completed_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@unique([provider, providerReference])
+  @@index([orderId])
+  @@index([provider, status])
+  @@map("payment_attempts")
+}
+
+model ProviderEvent {
+  id               String                        @id @default(cuid())
+  provider         PaymentProvider
+  eventType        String                        @map("event_type")
+  eventReference   String?                       @map("event_reference")
+  dedupeKey        String                        @unique @map("dedupe_key")
+  signatureValid   Boolean                       @default(false) @map("signature_valid")
+  payloadJson      Json                          @map("payload_json")
+  processingStatus ProviderEventProcessingStatus @default(RECEIVED) @map("processing_status")
+  receivedAt       DateTime                      @default(now()) @map("received_at")
+  processedAt      DateTime?                     @map("processed_at")
+
+  @@index([provider, eventReference])
+  @@index([provider, processingStatus])
+  @@map("provider_events")
+}
+
+model Entitlement {
+  id              String            @id @default(cuid())
+  customerId      String            @map("customer_id")
+  appId           String            @map("app_id")
+  productId       String            @map("product_id")
+  planId          String            @map("plan_id")
+  entitlementType EntitlementType   @map("entitlement_type")
+  status          EntitlementStatus @default(PENDING)
+  orderId         String            @map("order_id")
+  startsAt        DateTime          @default(now()) @map("starts_at")
+  expiresAt       DateTime?         @map("expires_at")
+
+  customer Customer @relation(fields: [customerId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+  plan     Plan     @relation(fields: [planId], references: [id])
+  order    Order    @relation(fields: [orderId], references: [id])
+  license  License?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([orderId, productId, planId, entitlementType])
+  @@index([customerId, appId, status])
+  @@index([orderId])
+  @@map("entitlements")
+}
+
+model License {
+  id            String        @id @default(cuid())
+  entitlementId String        @unique @map("entitlement_id")
+  licenseKey    String        @unique @map("license_key")
+  status        LicenseStatus @default(ACTIVE)
+  maxDevices    Int           @default(2) @map("max_devices")
+  isAdmin       Boolean       @default(false) @map("is_admin")
+
+  entitlement Entitlement         @relation(fields: [entitlementId], references: [id])
+  activations LicenseActivation[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("licenses")
+}
+
+model LicenseActivation {
+  id              String           @id @default(cuid())
+  licenseId       String           @map("license_id")
+  instanceId      String           @map("instance_id")
+  machineId       String           @map("machine_id")
+  appVersion      String?          @map("app_version")
+  status          ActivationStatus @default(ACTIVE)
+  activatedAt     DateTime         @default(now()) @map("activated_at")
+  lastValidatedAt DateTime?        @map("last_validated_at")
+  deactivatedAt   DateTime?        @map("deactivated_at")
+
+  license License @relation(fields: [licenseId], references: [id])
+
+  @@unique([licenseId, machineId, instanceId])
+  @@index([licenseId, status])
+  @@index([machineId, status])
+  @@map("license_activations")
+}
+
+model AdminDevice {
+  id        String  @id @default(cuid())
+  machineId String  @unique @map("machine_id")
+  email     String?
+  label     String?
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([active])
+  @@map("admin_devices")
+}
