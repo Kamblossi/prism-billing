@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { env } from "../../../config/env.js";
 
 type InitializePaystackTransactionInput = {
@@ -94,6 +95,34 @@ export async function verifyPaystackTransaction(
   };
 }
 
-export function verifyPaystackWebhookSignature() {
-  throw new Error("Not implemented yet");
+export function verifyPaystackWebhookSignature(
+  rawBody: Buffer,
+  signatureHeader?: string | null,
+): boolean {
+  if (!signatureHeader) return false;
+
+  const expected = crypto
+    .createHmac("sha512", env.PAYSTACK_SECRET_KEY)
+    .update(rawBody)
+    .digest("hex");
+
+  const provided = signatureHeader.trim();
+
+  if (expected.length !== provided.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected, "utf8"),
+    Buffer.from(provided, "utf8"),
+  );
+}
+
+export function buildPaystackEventDedupeKey(
+  eventType: string,
+  eventReference: string | null,
+  rawBody: Buffer,
+): string {
+  const rawHash = crypto.createHash("sha256").update(rawBody).digest("hex");
+  return `paystack:${eventType}:${eventReference ?? "no-reference"}:${rawHash}`;
 }

@@ -86,27 +86,29 @@ export async function initializeCheckout(
 ): Promise<InitializeCheckoutResult> {
   const email = normalizeEmail(input.email);
 
-  const product = await prisma.product.findFirst({
+  const product = await prisma.product.findUnique({
     where: {
-      appId: input.appId,
-      productCode: input.productCode,
-      active: true,
+      appId_productCode: {
+        appId: input.appId,
+        productCode: input.productCode,
+      },
     },
   });
 
-  if (!product) {
+  if (!product || !product.active) {
     throw new Error("Product not found or inactive");
   }
 
-  const plan = await prisma.plan.findFirst({
+  const plan = await prisma.plan.findUnique({
     where: {
-      productId: product.id,
-      planCode: input.planCode,
-      active: true,
+      productId_planCode: {
+        productId: product.id,
+        planCode: input.planCode,
+      },
     },
   });
 
-  if (!plan) {
+  if (!plan || !plan.active) {
     throw new Error("Plan not found or inactive");
   }
 

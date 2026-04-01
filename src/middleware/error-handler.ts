@@ -18,8 +18,9 @@ export function errorHandler(
 
   if (error instanceof Error) {
     const message = error.message;
+    const normalized = message.toLowerCase();
 
-    if (message.includes("not found") || message.includes("inactive")) {
+    if (normalized.includes("not found") || normalized.includes("inactive")) {
       return res.status(404).json({
         error: "NotFound",
         message,
