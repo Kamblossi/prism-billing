@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { prisma } from "../../db/prisma.js";
-import { LicenseStatus } from "../../generated/prisma/enums.js";
+import {
+  ActivationStatus,
+  LicenseStatus,
+} from "../../generated/prisma/enums.js";
+import { isEntitlementActive } from "../../utils/entitlement-time.js";
 
 type LicenseDb = Pick<typeof prisma, "license">;
 
@@ -9,6 +13,135 @@ type IssueLicenseInput = {
   maxDevices: number;
   isAdmin?: boolean;
 };
+
+export type ActivateLicenseInput = {
+  licenseKey: string;
+  machineId: string;
+  instanceId: string;
+  appVersion?: string | null;
+};
+
+export type ActivateLicenseResult = {
+  activated: boolean;
+  license_key?: string;
+  instance?: {
+    id: string;
+    name: string;
+    created_at?: string;
+  };
+  is_dev_license: boolean;
+  error?: string;
+  message?: string;
+};
+
+export type ValidateLicenseInput = {
+  licenseKey: string;
+  machineId: string;
+  instanceId: string;
+  appVersion?: string | null;
+};
+
+export type ValidateLicenseResult = {
+  is_active: boolean;
+  last_validated_at: string | null;
+  is_dev_license: boolean;
+  reason?: string;
+};
+
+export type DeactivateLicenseInput = {
+  licenseKey: string;
+  machineId: string;
+  instanceId: string;
+};
+
+export type DeactivateLicenseResult = {
+  deactivated: boolean;
+  license_key: string;
+  instance: {
+    id: string;
+    name: string;
+  };
+  is_dev_license: boolean;
+};
+
+function normalizeLicenseKey(value: string) {
+  return value.trim().toUpperCase();
+}
+
+async function findLicenseForRuntime(licenseKey: string) {
+  return prisma.license.findUnique({
+    where: { licenseKey },
+    include: {
+      entitlement: true,
+      activations: true,
+    },
+  });
+}
+
+function findMatchingActivation(
+  activations: Array<{
+    id: string;
+    instanceId: string;
+    machineId: string;
+    status: ActivationStatus;
+    activatedAt: Date;
+  }>,
+  machineId: string,
+  instanceId: string,
+) {
+  return activations.find(
+    (item) => item.machineId === machineId && item.instanceId === instanceId,
+  );
+}
+
+function countActiveActivations(
+  activations: Array<{ status: ActivationStatus }>,
+) {
+  return activations.filter(
+    (item) => item.status === ActivationStatus.ACTIVE,
+  ).length;
+}
+
+function isLicenseRuntimeEligible(license: {
+  status: LicenseStatus;
+  entitlement: {
+    status: any;
+    startsAt: Date;
+    expiresAt: Date | null;
+  } | null;
+}) {
+  if (license.status !== LicenseStatus.ACTIVE) {
+    return {
+      ok: false as const,
+      reason: "LICENSE_NOT_ACTIVE",
+      message: "License is not active.",
+    };
+  }
+
+  if (!license.entitlement) {
+    return {
+      ok: false as const,
+      reason: "ENTITLEMENT_MISSING",
+      message: "License entitlement is missing.",
+    };
+  }
+
+  const entitlementActive = isEntitlementActive({
+    status: license.entitlement.status,
+    startsAt: license.entitlement.startsAt,
+    expiresAt: license.entitlement.expiresAt,
+  });
+
+  if (!entitlementActive) {
+    return {
+      ok: false as const,
+      reason: "ENTITLEMENT_NOT_ACTIVE",
+      message: "The linked entitlement is inactive or expired.",
+    };
+  }
+
+  return { ok: true as const };
+}
 
 function generateLicenseKey() {
   const part = () => crypto.randomBytes(2).toString("hex").toUpperCase();
@@ -38,14 +171,220 @@ export async function issueLicenseForEntitlement(
   });
 }
 
-export async function activateLicense() {
-  throw new Error("Not implemented yet");
+export async function activateLicense(
+  input: ActivateLicenseInput,
+): Promise<ActivateLicenseResult> {
+  const licenseKey = normalizeLicenseKey(input.licenseKey);
+  const license = await findLicenseForRuntime(licenseKey);
+
+  if (!license) {
+    return {
+      activated: false,
+      error: "LICENSE_NOT_FOUND",
+      message: "License was not found.",
+      is_dev_license: false,
+    };
+  }
+
+  const eligibility = isLicenseRuntimeEligible(license);
+  if (!eligibility.ok) {
+    return {
+      activated: false,
+      error: eligibility.reason,
+      message: eligibility.message,
+      is_dev_license: license.isAdmin,
+    };
+  }
+
+  const existingActivation = findMatchingActivation(
+    license.activations,
+    input.machineId,
+    input.instanceId,
+  );
+
+  if (existingActivation?.status === ActivationStatus.ACTIVE) {
+    return {
+      activated: true,
+      license_key: license.licenseKey,
+      instance: {
+        id: existingActivation.instanceId,
+        name: existingActivation.instanceId,
+        created_at: existingActivation.activatedAt.toISOString(),
+      },
+      is_dev_license: license.isAdmin,
+    };
+  }
+
+  if (existingActivation?.status === ActivationStatus.INACTIVE) {
+    const reactivated = await prisma.licenseActivation.update({
+      where: { id: existingActivation.id },
+      data: {
+        status: ActivationStatus.ACTIVE,
+        deactivatedAt: null,
+        appVersion: input.appVersion ?? undefined,
+      },
+    });
+
+    return {
+      activated: true,
+      license_key: license.licenseKey,
+      instance: {
+        id: reactivated.instanceId,
+        name: reactivated.instanceId,
+        created_at: reactivated.activatedAt.toISOString(),
+      },
+      is_dev_license: license.isAdmin,
+    };
+  }
+
+  const activeCount = countActiveActivations(license.activations);
+
+  if (activeCount >= license.maxDevices) {
+    return {
+      activated: false,
+      error: "DEVICE_LIMIT_REACHED",
+      message: "This license has reached its device limit.",
+      is_dev_license: license.isAdmin,
+    };
+  }
+
+  const created = await prisma.licenseActivation.create({
+    data: {
+      licenseId: license.id,
+      machineId: input.machineId,
+      instanceId: input.instanceId,
+      appVersion: input.appVersion ?? null,
+      status: ActivationStatus.ACTIVE,
+      lastValidatedAt: new Date(),
+    },
+  });
+
+  return {
+    activated: true,
+    license_key: license.licenseKey,
+    instance: {
+      id: created.instanceId,
+      name: created.instanceId,
+      created_at: created.activatedAt.toISOString(),
+    },
+    is_dev_license: license.isAdmin,
+  };
 }
 
-export async function validateLicense() {
-  throw new Error("Not implemented yet");
+export async function validateLicense(
+  input: ValidateLicenseInput,
+): Promise<ValidateLicenseResult> {
+  const adminDevice = await prisma.adminDevice.findUnique({
+    where: { machineId: input.machineId },
+  });
+
+  if (adminDevice?.active) {
+    return {
+      is_active: true,
+      last_validated_at: new Date().toISOString(),
+      is_dev_license: true,
+    };
+  }
+
+  const licenseKey = normalizeLicenseKey(input.licenseKey);
+  const license = await findLicenseForRuntime(licenseKey);
+
+  if (!license) {
+    return {
+      is_active: false,
+      last_validated_at: null,
+      is_dev_license: false,
+      reason: "LICENSE_NOT_FOUND",
+    };
+  }
+
+  const eligibility = isLicenseRuntimeEligible(license);
+  if (!eligibility.ok) {
+    return {
+      is_active: false,
+      last_validated_at: null,
+      is_dev_license: license.isAdmin,
+      reason: eligibility.reason,
+    };
+  }
+
+  const activation = license.activations.find(
+    (item) =>
+      item.machineId === input.machineId &&
+      item.instanceId === input.instanceId &&
+      item.status === ActivationStatus.ACTIVE,
+  );
+
+  if (!activation) {
+    return {
+      is_active: false,
+      last_validated_at: null,
+      is_dev_license: license.isAdmin,
+      reason: "ACTIVATION_NOT_FOUND",
+    };
+  }
+
+  const updated = await prisma.licenseActivation.update({
+    where: { id: activation.id },
+    data: {
+      lastValidatedAt: new Date(),
+      appVersion: input.appVersion ?? activation.appVersion ?? null,
+    },
+  });
+
+  return {
+    is_active: true,
+    last_validated_at: updated.lastValidatedAt?.toISOString() ?? null,
+    is_dev_license: license.isAdmin,
+  };
 }
 
-export async function deactivateLicense() {
-  throw new Error("Not implemented yet");
+export async function deactivateLicense(
+  input: DeactivateLicenseInput,
+): Promise<DeactivateLicenseResult> {
+  const licenseKey = normalizeLicenseKey(input.licenseKey);
+  const license = await prisma.license.findUnique({
+    where: { licenseKey },
+    include: {
+      activations: true,
+    },
+  });
+
+  if (!license) {
+    return {
+      deactivated: true,
+      license_key: licenseKey,
+      instance: {
+        id: input.instanceId,
+        name: input.instanceId,
+      },
+      is_dev_license: false,
+    };
+  }
+
+  const activation = findMatchingActivation(
+    license.activations,
+    input.machineId,
+    input.instanceId,
+  );
+
+  if (activation?.status === ActivationStatus.ACTIVE) {
+    await prisma.licenseActivation.update({
+      where: { id: activation.id },
+      data: {
+        status: ActivationStatus.INACTIVE,
+        deactivatedAt: new Date(),
+      },
+    });
+  }
+
+  return {
+    deactivated: true,
+    license_key: license.licenseKey,
+    instance: {
+      id: input.instanceId,
+      name: input.instanceId,
+    },
+    is_dev_license: license.isAdmin,
+  };
 }
