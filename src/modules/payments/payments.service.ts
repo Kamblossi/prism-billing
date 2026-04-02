@@ -4,7 +4,7 @@ import {
   OrderStatus,
   PaymentAttemptStatus,
   PaymentProvider,
-} from "../../generated/prisma/enums.js";
+} from "../../generated/prisma/index.js";
 import { createLicenseEntitlement } from "../entitlements/entitlements.service.js";
 import { issueLicenseForEntitlement } from "../licenses/licenses.service.js";
 import { verifyPaystackTransaction } from "../providers/paystack/paystack.service.js";

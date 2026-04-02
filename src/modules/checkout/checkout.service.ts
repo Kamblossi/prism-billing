@@ -3,7 +3,7 @@ import {
   OrderStatus,
   PaymentAttemptStatus,
   PaymentProvider,
-} from "../../generated/prisma/enums.js";
+} from "../../generated/prisma/index.js";
 import { env } from "../../config/env.js";
 import { prisma } from "../../db/prisma.js";
 import { generateProviderReference, normalizeEmail } from "../../utils/ids.js";

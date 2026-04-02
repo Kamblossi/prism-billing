@@ -2,7 +2,7 @@ import { prisma } from "../../db/prisma.js";
 import {
   EntitlementStatus,
   EntitlementType,
-} from "../../generated/prisma/enums.js";
+} from "../../generated/prisma/index.js";
 import { calculateEntitlementWindow } from "../../utils/entitlement-time.js";
 
 type EntitlementDb = Pick<typeof prisma, "entitlement">;

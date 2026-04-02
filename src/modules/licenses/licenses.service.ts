@@ -3,7 +3,7 @@ import { prisma } from "../../db/prisma.js";
 import {
   ActivationStatus,
   LicenseStatus,
-} from "../../generated/prisma/enums.js";
+} from "../../generated/prisma/index.js";
 import { isEntitlementActive } from "../../utils/entitlement-time.js";
 
 type LicenseDb = Pick<typeof prisma, "license">;
