@@ -23,8 +23,19 @@ const PRODUCT = {
 
 const PLANS = [
   {
+    planCode: "basic-monthly",
+    name: "Basic License",
+    billingType: BillingType.ONE_TIME,
+    amountMinor: 364200,
+    currency: "KES",
+    accessPeriodUnit: AccessPeriodUnit.MONTH,
+    accessPeriodCount: 1,
+    maxDevices: 1,
+    active: true,
+  },
+  {
     planCode: "pro-monthly",
-    name: "Pro Monthly",
+    name: "Pro Monthly License",
     billingType: BillingType.ONE_TIME,
     amountMinor: 520000,
     currency: "KES",
@@ -35,13 +46,24 @@ const PLANS = [
   },
   {
     planCode: "pro-yearly",
-    name: "Pro Yearly",
+    name: "Pro Yearly License",
     billingType: BillingType.ONE_TIME,
     amountMinor: 4667400,
     currency: "KES",
     accessPeriodUnit: AccessPeriodUnit.YEAR,
     accessPeriodCount: 1,
     maxDevices: 2,
+    active: true,
+  },
+  {
+    planCode: "limited-trial",
+    name: "Limited Trial",
+    billingType: BillingType.ONE_TIME,
+    amountMinor: 300,
+    currency: "KES",
+    accessPeriodUnit: AccessPeriodUnit.DAY,
+    accessPeriodCount: 1,
+    maxDevices: 1,
     active: true,
   },
 ] as const;
@@ -66,6 +88,20 @@ async function main() {
         name: PRODUCT.name,
         description: PRODUCT.description,
         active: PRODUCT.active,
+      },
+    });
+
+    const desiredPlanCodes = new Set(PLANS.map((plan) => plan.planCode));
+
+    await tx.plan.updateMany({
+      where: {
+        productId: product.id,
+        planCode: {
+          notIn: Array.from(desiredPlanCodes),
+        },
+      },
+      data: {
+        active: false,
       },
     });
 
@@ -117,6 +153,7 @@ async function main() {
     plans: result.plans.map((plan) => ({
       planId: plan.id,
       planCode: plan.planCode,
+      name: plan.name,
       billingType: plan.billingType,
       currency: plan.currency,
       amountMinor: plan.amountMinor,
