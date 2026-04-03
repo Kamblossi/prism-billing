@@ -3,6 +3,7 @@ import { prisma } from "../../db/prisma.js";
 import {
   ActivationStatus,
   LicenseStatus,
+  Prisma,
 } from "../../generated/prisma/index.js";
 import { isEntitlementActive } from "../../utils/entitlement-time.js";
 
@@ -90,9 +91,11 @@ async function findLicenseForRuntime(licenseKey: string) {
       entitlement: {
         include: {
           plan: true,
+          customer: true,
         },
       },
       activations: true,
+      trialRedemption: true,
     },
   });
 }
@@ -124,7 +127,7 @@ function countActiveActivations(
 function isLicenseRuntimeEligible(license: {
   status: LicenseStatus;
   entitlement: {
-    status: any;
+    status: unknown;
     startsAt: Date;
     expiresAt: Date | null;
   } | null;
@@ -244,9 +247,110 @@ function buildRuntimeCapabilities(input: {
   };
 }
 
+function isLimitedTrialPlanCode(planCode: string | null | undefined): boolean {
+  return (planCode ?? "").trim().toLowerCase() === "limited-trial";
+}
+
+function isLimitedTrialLicense(license: {
+  entitlement?: { plan?: { planCode: string } | null } | null;
+}): boolean {
+  return isLimitedTrialPlanCode(license.entitlement?.plan?.planCode);
+}
+
 function generateLicenseKey() {
   const part = () => crypto.randomBytes(2).toString("hex").toUpperCase();
   return `RIEKO-${part()}-${part()}-${part()}-${part()}`;
+}
+
+async function enforceLimitedTrialActivationPolicy(
+  tx: Prisma.TransactionClient,
+  license: NonNullable<Awaited<ReturnType<typeof findLicenseForRuntime>>>,
+  input: ActivateLicenseInput,
+): Promise<{ ok: true } | { ok: false; error: string; message: string }> {
+  if (!isLimitedTrialLicense(license)) {
+    return { ok: true };
+  }
+
+  const customer = license.entitlement?.customer;
+
+  if (!customer) {
+    return {
+      ok: false,
+      error: "TRIAL_CONTEXT_MISSING",
+      message: "Limited trial activation context is incomplete.",
+    };
+  }
+
+  const historicalActivationOnDifferentMachine = license.activations.find(
+    (activation) => activation.machineId !== input.machineId,
+  );
+
+  if (historicalActivationOnDifferentMachine) {
+    return {
+      ok: false,
+      error: "TRIAL_LICENSE_LOCKED_TO_MACHINE",
+      message:
+        "This limited trial license is already locked to a different machine.",
+    };
+  }
+
+  if (license.trialRedemption) {
+    if (license.trialRedemption.machineId !== input.machineId) {
+      return {
+        ok: false,
+        error: "TRIAL_LICENSE_LOCKED_TO_MACHINE",
+        message:
+          "This limited trial license is already locked to a different machine.",
+      };
+    }
+
+    return { ok: true };
+  }
+
+  const existingMachineRedemption = await tx.trialRedemption.findUnique({
+    where: { machineId: input.machineId },
+    select: { licenseId: true },
+  });
+
+  if (
+    existingMachineRedemption &&
+    existingMachineRedemption.licenseId !== license.id
+  ) {
+    return {
+      ok: false,
+      error: "TRIAL_MACHINE_ALREADY_USED",
+      message:
+        "This machine has already redeemed a limited trial and cannot redeem another one.",
+    };
+  }
+
+  const existingCustomerRedemption = await tx.trialRedemption.findUnique({
+    where: { customerId: customer.id },
+    select: { licenseId: true },
+  });
+
+  if (
+    existingCustomerRedemption &&
+    existingCustomerRedemption.licenseId !== license.id
+  ) {
+    return {
+      ok: false,
+      error: "TRIAL_CUSTOMER_ALREADY_USED",
+      message: "This customer has already redeemed the limited trial.",
+    };
+  }
+
+  await tx.trialRedemption.create({
+    data: {
+      licenseId: license.id,
+      customerId: customer.id,
+      customerEmail: customer.email,
+      machineId: input.machineId,
+      instanceId: input.instanceId,
+    },
+  });
+
+  return { ok: true };
 }
 
 export async function issueLicenseForEntitlement(
@@ -297,13 +401,28 @@ export async function activateLicense(
     };
   }
 
+  if (isLimitedTrialLicense(license)) {
+    const trialPolicy = await prisma.$transaction((tx) =>
+      enforceLimitedTrialActivationPolicy(tx, license, input),
+    );
+
+    if (!trialPolicy.ok) {
+      return {
+        activated: false,
+        error: trialPolicy.error,
+        message: trialPolicy.message,
+        is_dev_license: license.isAdmin,
+      };
+    }
+  }
+
   const existingActivation = findMatchingActivation(
     license.activations,
     input.machineId,
     input.instanceId,
   );
 
-  if (existingActivation?.status === ActivationStatus.ACTIVE) {
+  if (existingActivation && existingActivation.status === ActivationStatus.ACTIVE) {
     return {
       activated: true,
       license_key: license.licenseKey,
@@ -316,7 +435,7 @@ export async function activateLicense(
     };
   }
 
-  if (existingActivation?.status === ActivationStatus.INACTIVE) {
+  if (existingActivation && existingActivation.status === ActivationStatus.INACTIVE) {
     const reactivated = await prisma.licenseActivation.update({
       where: { id: existingActivation.id },
       data: {
@@ -430,6 +549,22 @@ export async function validateLicense(
     };
   }
 
+  if (
+    isLimitedTrialLicense(license) &&
+    license.trialRedemption &&
+    license.trialRedemption.machineId !== input.machineId
+  ) {
+    return {
+      is_active: false,
+      last_validated_at: null,
+      is_dev_license: license.isAdmin,
+      reason: "TRIAL_MACHINE_MISMATCH",
+      plan_code: license.entitlement?.plan?.planCode ?? null,
+      tier: runtime.tier,
+      capabilities: runtime.capabilities,
+    };
+  }
+
   const activation = license.activations.find(
     (item) =>
       item.machineId === input.machineId &&
@@ -456,6 +591,15 @@ export async function validateLicense(
       appVersion: input.appVersion ?? activation.appVersion ?? null,
     },
   });
+
+  if (isLimitedTrialLicense(license) && license.trialRedemption) {
+    await prisma.trialRedemption.update({
+      where: { licenseId: license.id },
+      data: {
+        lastValidatedAt: new Date(),
+      },
+    });
+  }
 
   return {
     is_active: true,
@@ -496,7 +640,7 @@ export async function deactivateLicense(
     input.instanceId,
   );
 
-  if (activation?.status === ActivationStatus.ACTIVE) {
+  if (activation && activation.status === ActivationStatus.ACTIVE) {
     await prisma.licenseActivation.update({
       where: { id: activation.id },
       data: {

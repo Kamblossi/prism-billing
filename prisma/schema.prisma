@@ -95,8 +95,9 @@ model Customer {
   id           String        @id @default(cuid())
   email        String        @unique
   name         String?
-  orders       Order[]
-  entitlements Entitlement[]
+  orders           Order[]
+  entitlements     Entitlement[]
+  trialRedemptions TrialRedemption[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -263,8 +264,9 @@ model License {
   maxDevices    Int           @default(2) @map("max_devices")
   isAdmin       Boolean       @default(false) @map("is_admin")
 
-  entitlement Entitlement         @relation(fields: [entitlementId], references: [id])
-  activations LicenseActivation[]
+  entitlement     Entitlement         @relation(fields: [entitlementId], references: [id])
+  activations     LicenseActivation[]
+  trialRedemption TrialRedemption?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -290,6 +292,23 @@ model LicenseActivation {
   @@index([licenseId, status])
   @@index([machineId, status])
   @@map("license_activations")
+}
+
+model TrialRedemption {
+  id              String    @id @default(cuid())
+  licenseId       String    @unique @map("license_id")
+  customerId      String    @unique @map("customer_id")
+  customerEmail   String    @map("customer_email")
+  machineId       String    @unique @map("machine_id")
+  instanceId      String    @map("instance_id")
+  redeemedAt      DateTime  @default(now()) @map("redeemed_at")
+  lastValidatedAt DateTime? @map("last_validated_at")
+
+  license  License  @relation(fields: [licenseId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerEmail])
+  @@map("trial_redemptions")
 }
 
 model AdminDevice {

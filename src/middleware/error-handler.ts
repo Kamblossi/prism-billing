@@ -17,6 +17,22 @@ export function errorHandler(
   }
 
   if (error instanceof Error) {
+    const statusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === "number"
+        ? (error as { statusCode: number }).statusCode
+        : null;
+    const errorCode =
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : null;
+
+    if (statusCode) {
+      return res.status(statusCode).json({
+        error: errorCode ?? "RequestError",
+        message: error.message,
+      });
+    }
+
     const message = error.message;
     const normalized = message.toLowerCase();
 

@@ -3,6 +3,7 @@ import {
   OrderStatus,
   PaymentAttemptStatus,
   PaymentProvider,
+  Prisma,
 } from "../../generated/prisma/index.js";
 import { env } from "../../config/env.js";
 import { prisma } from "../../db/prisma.js";
@@ -39,6 +40,69 @@ export type InitializeCheckoutResult = {
   checkoutUrl: string;
   reference: string;
 };
+
+class CheckoutRuleError extends Error {
+  readonly statusCode: number;
+  readonly code: string;
+
+  constructor(statusCode: number, code: string, message: string) {
+    super(message);
+    this.name = "CheckoutRuleError";
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+function isLimitedTrialPlan(planCode: string): boolean {
+  return planCode.trim().toLowerCase() === "limited-trial";
+}
+
+async function assertTrialCheckoutAllowed(
+  tx: Prisma.TransactionClient,
+  input: {
+    customerId: string;
+    planId: string;
+  },
+) {
+  const existingRedemption = await tx.trialRedemption.findUnique({
+    where: { customerId: input.customerId },
+    select: { id: true },
+  });
+
+  if (existingRedemption) {
+    throw new CheckoutRuleError(
+      409,
+      "CUSTOMER_TRIAL_ALREADY_USED",
+      "This customer has already redeemed the limited trial.",
+    );
+  }
+
+  const existingTrialOrder = await tx.orderItem.findFirst({
+    where: {
+      planId: input.planId,
+      order: {
+        customerId: input.customerId,
+        status: {
+          in: [
+            OrderStatus.CREATED,
+            OrderStatus.PAYMENT_PENDING,
+            OrderStatus.PAID,
+            OrderStatus.FULFILLED,
+          ],
+        },
+      },
+    },
+    select: { id: true },
+  });
+
+  if (existingTrialOrder) {
+    throw new CheckoutRuleError(
+      409,
+      "CUSTOMER_TRIAL_ALREADY_STARTED",
+      "This customer already has a limited trial checkout or entitlement.",
+    );
+  }
+}
 
 export async function listCatalogPlans(
   appId: string,
@@ -125,6 +189,13 @@ export async function initializeCheckout(
         name: input.name?.trim() || null,
       },
     });
+
+    if (isLimitedTrialPlan(plan.planCode)) {
+      await assertTrialCheckoutAllowed(tx, {
+        customerId: customer.id,
+        planId: plan.id,
+      });
+    }
 
     const order = await tx.order.create({
       data: {
