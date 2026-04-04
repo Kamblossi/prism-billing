@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/app.js",
   "scripts": {
+    "dev": "tsx watch src/app.ts",
     "postinstall": "prisma generate",
     "build": "tsc",
     "start": "node dist/app.js"

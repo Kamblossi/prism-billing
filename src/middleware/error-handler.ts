@@ -17,13 +17,18 @@ export function errorHandler(
   }
 
   if (error instanceof Error) {
+    const errorWithMeta = error as Error & {
+      statusCode?: unknown;
+      code?: unknown;
+    };
+
     const statusCode =
-      typeof (error as { statusCode?: unknown }).statusCode === "number"
-        ? (error as { statusCode: number }).statusCode
+      typeof errorWithMeta.statusCode === "number"
+        ? errorWithMeta.statusCode
         : null;
     const errorCode =
-      typeof (error as { code?: unknown }).code === "string"
-        ? (error as { code: string }).code
+      typeof errorWithMeta.code === "string"
+        ? errorWithMeta.code
         : null;
 
     if (statusCode) {

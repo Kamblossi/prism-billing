@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "../../db/prisma.js";
 import {
   ActivationStatus,
+  EntitlementStatus,
   LicenseStatus,
   Prisma,
 } from "../../generated/prisma/index.js";
@@ -127,7 +128,7 @@ function countActiveActivations(
 function isLicenseRuntimeEligible(license: {
   status: LicenseStatus;
   entitlement: {
-    status: unknown;
+    status: EntitlementStatus;
     startsAt: Date;
     expiresAt: Date | null;
   } | null;
