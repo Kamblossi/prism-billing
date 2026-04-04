@@ -3,7 +3,7 @@ import {
   AccessPeriodUnit,
   BillingType,
   PrismaClient,
-} from "../src/generated/prisma/client.js";
+} from "../src/generated/prisma/index.js";
 
 const prisma = new PrismaClient({
   datasources: {
