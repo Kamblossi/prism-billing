@@ -5,12 +5,9 @@
   "type": "module",
   "main": "dist/app.js",
   "scripts": {
-    "dev": "tsx src/app.ts",
+    "postinstall": "prisma generate",
     "build": "tsc",
-    "start": "node dist/app.js",
-    "prisma:generate": "prisma generate",
-    "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "start": "node dist/app.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",

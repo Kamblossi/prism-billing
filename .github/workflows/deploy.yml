@@ -20,7 +20,9 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~/prism-billing
+            git checkout master
             git pull origin master
             npm install
-            npx prisma generate
-            pm2 restart prism-billing-api
+            npx prisma migrate deploy
+            npm run build
+            pm2 restart prism-billing-api || pm2 start dist/app.js --name prism-billing-api
