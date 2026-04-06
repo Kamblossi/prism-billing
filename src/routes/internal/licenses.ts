@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireInternalAuth } from "../../middleware/internal-auth.js";
+import { requireDesktopOrInternalAuth } from "../../middleware/internal-auth.js";
 import {
   activateLicense,
   deactivateLicense,
@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-router.use(requireInternalAuth);
+router.use(requireDesktopOrInternalAuth);
 
 const runtimeBodySchema = z.object({
   license_key: z.string().trim().min(1),
