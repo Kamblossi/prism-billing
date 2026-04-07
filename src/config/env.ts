@@ -30,9 +30,7 @@ export const env = {
 
   PAYSTACK_SECRET_KEY: requireEnv("PAYSTACK_SECRET_KEY"),
   INTERNAL_API_ACCESS_KEY: requireEnv("INTERNAL_API_ACCESS_KEY"),
-  // Transition-safe default keeps old behavior until DESKTOP_BILLING_KEY is explicitly set.
-  DESKTOP_BILLING_KEY:
-    process.env.DESKTOP_BILLING_KEY ?? requireEnv("INTERNAL_API_ACCESS_KEY"),
+  DESKTOP_BILLING_KEY: requireEnv("DESKTOP_BILLING_KEY"),
 
   FRONTEND_BASE_URL:
     process.env.FRONTEND_BASE_URL ?? "https://rieko.prismtechco.com",

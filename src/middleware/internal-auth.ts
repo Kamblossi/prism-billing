@@ -55,29 +55,3 @@ export function requireDesktopBillingAuth(
 
   next();
 }
-
-export function requireDesktopOrInternalAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  const token = getBearerToken(req);
-  if (!token) {
-    return res.status(401).json({
-      error: "Unauthorized",
-      message: "Missing Bearer token",
-    });
-  }
-
-  if (
-    token !== env.DESKTOP_BILLING_KEY &&
-    token !== env.INTERNAL_API_ACCESS_KEY
-  ) {
-    return res.status(401).json({
-      error: "Unauthorized",
-      message: "Invalid service token",
-    });
-  }
-
-  next();
-}
