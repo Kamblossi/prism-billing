@@ -46,12 +46,15 @@ export function requireDesktopBillingAuth(
     });
   }
 
-  if (token !== env.DESKTOP_BILLING_KEY) {
-    return res.status(401).json({
-      error: "Unauthorized",
-      message: "Invalid desktop billing token",
-    });
+  const isDesktopKey = token === env.DESKTOP_BILLING_KEY;
+  const isInternalKey = token === env.INTERNAL_API_ACCESS_KEY;
+
+  if (isDesktopKey || isInternalKey) {
+    return next();
   }
 
-  next();
+  return res.status(401).json({
+    error: "Unauthorized",
+    message: "Invalid desktop billing token",
+  });
 }
