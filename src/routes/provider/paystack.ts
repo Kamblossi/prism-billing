@@ -3,7 +3,7 @@ import { prisma } from "../../db/prisma.js";
 import {
   PaymentProvider,
   ProviderEventProcessingStatus,
-} from "../../generated/prisma/index.js";
+} from "@prisma/client";
 import { processSuccessfulPayment } from "../../modules/payments/payments.service.js";
 import {
   buildPaystackEventDedupeKey,

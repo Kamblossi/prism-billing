@@ -4,7 +4,7 @@ import {
   PaymentAttemptStatus,
   PaymentProvider,
   Prisma,
-} from "../../generated/prisma/index.js";
+} from "@prisma/client";
 import { env } from "../../config/env.js";
 import { prisma } from "../../db/prisma.js";
 import { generateProviderReference, normalizeEmail } from "../../utils/ids.js";

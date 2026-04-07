@@ -5,7 +5,7 @@ import {
   EntitlementStatus,
   LicenseStatus,
   Prisma,
-} from "../../generated/prisma/index.js";
+} from "@prisma/client";
 import { isEntitlementActive } from "../../utils/entitlement-time.js";
 
 type LicenseDb = Pick<typeof prisma, "license">;

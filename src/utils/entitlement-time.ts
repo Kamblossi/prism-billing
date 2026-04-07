@@ -1,5 +1,5 @@
 import { addDays, addMonths, addYears } from "date-fns";
-import { AccessPeriodUnit, EntitlementStatus } from "../generated/prisma/index.js";
+import { AccessPeriodUnit, EntitlementStatus } from "@prisma/client";
 
 export type EntitlementWindowInput = {
   startAt?: Date;
