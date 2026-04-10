@@ -18,12 +18,6 @@ type IssueLicenseInput = {
 
 export type LicenseRuntimeCapabilities = {
   cloud_enabled: boolean;
-  dev_space_enabled: boolean;
-  byok_enabled: boolean;
-  allowed_model_keys: string[];
-  monthly_generation_limit: number | null;
-  trial_request_limit: number | null;
-  device_limit: number;
 };
 
 export type LicenseTier = "basic" | "pro" | "trial" | "admin";
@@ -43,6 +37,7 @@ export type ActivateLicenseResult = {
     name: string;
     created_at?: string;
   };
+  is_admin?: boolean;
   is_dev_license: boolean;
   error?: string;
   message?: string;
@@ -58,6 +53,7 @@ export type ValidateLicenseInput = {
 export type ValidateLicenseResult = {
   is_active: boolean;
   last_validated_at: string | null;
+  is_admin?: boolean;
   is_dev_license: boolean;
   reason?: string;
   plan_code?: string | null;
@@ -78,6 +74,7 @@ export type DeactivateLicenseResult = {
     id: string;
     name: string;
   };
+  is_admin?: boolean;
   is_dev_license: boolean;
 };
 
@@ -168,7 +165,6 @@ function isLicenseRuntimeEligible(license: {
 
 function buildRuntimeCapabilities(input: {
   planCode: string | null;
-  maxDevices: number;
   isAdmin: boolean;
 }): { tier: LicenseTier; capabilities: LicenseRuntimeCapabilities } {
   if (input.isAdmin) {
@@ -176,20 +172,6 @@ function buildRuntimeCapabilities(input: {
       tier: "admin",
       capabilities: {
         cloud_enabled: true,
-        dev_space_enabled: true,
-        byok_enabled: true,
-        allowed_model_keys: [
-          "auto",
-          "fast",
-          "premium",
-          "vision",
-          "code",
-          "audio",
-          "audio-auto",
-        ],
-        monthly_generation_limit: null,
-        trial_request_limit: null,
-        device_limit: input.maxDevices,
       },
     };
   }
@@ -201,12 +183,6 @@ function buildRuntimeCapabilities(input: {
       tier: "trial",
       capabilities: {
         cloud_enabled: true,
-        dev_space_enabled: false,
-        byok_enabled: false,
-        allowed_model_keys: ["auto", "fast", "audio", "audio-auto"],
-        monthly_generation_limit: null,
-        trial_request_limit: 5,
-        device_limit: input.maxDevices,
       },
     };
   }
@@ -216,12 +192,6 @@ function buildRuntimeCapabilities(input: {
       tier: "basic",
       capabilities: {
         cloud_enabled: false,
-        dev_space_enabled: true,
-        byok_enabled: true,
-        allowed_model_keys: [],
-        monthly_generation_limit: null,
-        trial_request_limit: null,
-        device_limit: input.maxDevices,
       },
     };
   }
@@ -230,21 +200,14 @@ function buildRuntimeCapabilities(input: {
     tier: "pro",
     capabilities: {
       cloud_enabled: true,
-      dev_space_enabled: true,
-      byok_enabled: true,
-      allowed_model_keys: [
-        "auto",
-        "fast",
-        "premium",
-        "vision",
-        "code",
-        "audio",
-        "audio-auto",
-      ],
-      monthly_generation_limit: normalizedPlan === "pro-monthly" ? 1500 : null,
-      trial_request_limit: null,
-      device_limit: input.maxDevices,
     },
+  };
+}
+
+function buildAdminFlags(isAdmin: boolean) {
+  return {
+    is_admin: isAdmin,
+    is_dev_license: isAdmin,
   };
 }
 
@@ -388,7 +351,7 @@ export async function activateLicense(
       activated: false,
       error: "LICENSE_NOT_FOUND",
       message: "License was not found.",
-      is_dev_license: false,
+      ...buildAdminFlags(false),
     };
   }
 
@@ -398,7 +361,7 @@ export async function activateLicense(
       activated: false,
       error: eligibility.reason,
       message: eligibility.message,
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
     };
   }
 
@@ -412,7 +375,7 @@ export async function activateLicense(
         activated: false,
         error: trialPolicy.error,
         message: trialPolicy.message,
-        is_dev_license: license.isAdmin,
+        ...buildAdminFlags(license.isAdmin),
       };
     }
   }
@@ -432,7 +395,7 @@ export async function activateLicense(
         name: existingActivation.instanceId,
         created_at: existingActivation.activatedAt.toISOString(),
       },
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
     };
   }
 
@@ -454,7 +417,7 @@ export async function activateLicense(
         name: reactivated.instanceId,
         created_at: reactivated.activatedAt.toISOString(),
       },
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
     };
   }
 
@@ -465,7 +428,7 @@ export async function activateLicense(
       activated: false,
       error: "DEVICE_LIMIT_REACHED",
       message: "This license has reached its device limit.",
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
     };
   }
 
@@ -488,7 +451,7 @@ export async function activateLicense(
       name: created.instanceId,
       created_at: created.activatedAt.toISOString(),
     },
-    is_dev_license: license.isAdmin,
+    ...buildAdminFlags(license.isAdmin),
   };
 }
 
@@ -502,14 +465,13 @@ export async function validateLicense(
   if (adminDevice?.active) {
     const runtime = buildRuntimeCapabilities({
       planCode: "admin",
-      maxDevices: 99,
       isAdmin: true,
     });
 
     return {
       is_active: true,
       last_validated_at: new Date().toISOString(),
-      is_dev_license: true,
+      ...buildAdminFlags(true),
       plan_code: "admin",
       tier: runtime.tier,
       capabilities: runtime.capabilities,
@@ -523,7 +485,7 @@ export async function validateLicense(
     return {
       is_active: false,
       last_validated_at: null,
-      is_dev_license: false,
+      ...buildAdminFlags(false),
       reason: "LICENSE_NOT_FOUND",
       plan_code: null,
       tier: null,
@@ -533,7 +495,6 @@ export async function validateLicense(
 
   const runtime = buildRuntimeCapabilities({
     planCode: license.entitlement?.plan?.planCode ?? null,
-    maxDevices: license.maxDevices,
     isAdmin: license.isAdmin,
   });
 
@@ -542,7 +503,7 @@ export async function validateLicense(
     return {
       is_active: false,
       last_validated_at: null,
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
       reason: eligibility.reason,
       plan_code: license.entitlement?.plan?.planCode ?? null,
       tier: runtime.tier,
@@ -558,7 +519,7 @@ export async function validateLicense(
     return {
       is_active: false,
       last_validated_at: null,
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
       reason: "TRIAL_MACHINE_MISMATCH",
       plan_code: license.entitlement?.plan?.planCode ?? null,
       tier: runtime.tier,
@@ -577,7 +538,7 @@ export async function validateLicense(
     return {
       is_active: false,
       last_validated_at: null,
-      is_dev_license: license.isAdmin,
+      ...buildAdminFlags(license.isAdmin),
       reason: "ACTIVATION_NOT_FOUND",
       plan_code: license.entitlement?.plan?.planCode ?? null,
       tier: runtime.tier,
@@ -605,7 +566,7 @@ export async function validateLicense(
   return {
     is_active: true,
     last_validated_at: updated.lastValidatedAt?.toISOString() ?? null,
-    is_dev_license: license.isAdmin,
+    ...buildAdminFlags(license.isAdmin),
     plan_code: license.entitlement?.plan?.planCode ?? null,
     tier: runtime.tier,
     capabilities: runtime.capabilities,
@@ -631,7 +592,7 @@ export async function deactivateLicense(
         id: input.instanceId,
         name: input.instanceId,
       },
-      is_dev_license: false,
+      ...buildAdminFlags(false),
     };
   }
 
@@ -658,6 +619,6 @@ export async function deactivateLicense(
       id: input.instanceId,
       name: input.instanceId,
     },
-    is_dev_license: license.isAdmin,
+    ...buildAdminFlags(license.isAdmin),
   };
 }
